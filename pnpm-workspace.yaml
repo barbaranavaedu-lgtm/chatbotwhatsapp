@@ -1,0 +1,6 @@
+packages:
+  - "."
+  - "frontend"
+allowBuilds:
+  "whatsapp-web.js@git+https://github.com/pedroslopez/whatsapp-web.js.git#2dc9466facb027caee19dbf285e0a2763f5373bb": true
+  "puppeteer": true
