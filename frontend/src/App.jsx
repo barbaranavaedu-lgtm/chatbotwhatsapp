@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
+import { QRCodeSVG } from 'qrcode.react';
 
 const BACKEND_URL = 'http://localhost:3001';
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
+  const [qrCode, setQrCode] = useState('');
   const [qrCodeUrl, setQrCodeUrl] = useState(null);
   const [bulkDelay, setBulkDelay] = useState(2); // default 2 seconds
   const [autoResponseDelay, setAutoResponseDelay] = useState(3); // default 3 seconds
@@ -37,12 +39,14 @@ function App() {
     socketRef.current.on('ready', (data) => {
       setIsConnected(data.status);
       if (data.status) {
+        setQrCode('');
         setQrCodeUrl(null);
       }
     });
 
     socketRef.current.on('qr', (data) => {
       setIsConnected(false);
+      setQrCode(data.qrCode || '');
       setQrCodeUrl(data.qrCodeUrl);
     });
 
@@ -51,6 +55,9 @@ function App() {
       .then(res => res.json())
       .then(data => {
         setIsConnected(data.isConnected);
+        if (data.qrCode) {
+          setQrCode(data.qrCode);
+        }
         if (data.qrCodeUrl) {
           setQrCodeUrl(data.qrCodeUrl);
         }
@@ -225,7 +232,14 @@ function App() {
             
             {!isConnected && (
               <div className="qr-container">
-                {qrCodeUrl ? (
+                {qrCode ? (
+                  <>
+                    <div style={{ background: 'white', padding: '1rem', borderRadius: 'var(--radius-md)', display: 'inline-flex' }}>
+                      <QRCodeSVG value={qrCode} size={180} />
+                    </div>
+                    <p className="qr-text">Escanea este código con tu celular en WhatsApp Web para vincular la sesión.</p>
+                  </>
+                ) : qrCodeUrl ? (
                   <>
                     <img src={qrCodeUrl} className="qr-image" alt="WhatsApp QR Code" />
                     <p className="qr-text">Escanea este código con tu celular en WhatsApp Web para vincular la sesión.</p>

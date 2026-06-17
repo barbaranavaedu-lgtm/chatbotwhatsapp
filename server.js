@@ -128,7 +128,7 @@ client.on('message', async (msg) => {
 
 // Endpoints
 app.get('/api/status', (req, res) => {
-    res.json({ isConnected, qrCodeUrl });
+    res.json({ isConnected, qrCodeUrl, qrCode: qrCodeString });
 });
 
 app.post('/api/config', (req, res) => {
