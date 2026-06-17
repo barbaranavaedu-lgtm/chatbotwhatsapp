@@ -38,6 +38,7 @@ const MOCK_PDF = 'JVBERi0xLjEKMSAwIG9iagogIDw8IC9UeXBlIC9DYXRhbG9nCiAgICAgL1BhZ2
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
+        executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
         headless: true,
         args: [
             '--no-sandbox',
