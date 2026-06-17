@@ -37,6 +37,10 @@ const MOCK_PDF = 'JVBERi0xLjEKMSAwIG9iagogIDw8IC9UeXBlIC9DYXRhbG9nCiAgICAgL1BhZ2
 // Initialize WhatsApp Web Client
 const client = new Client({
     authStrategy: new LocalAuth(),
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+    },
     puppeteer: {
         executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
         headless: true,
@@ -46,8 +50,6 @@ const client = new Client({
             '--disable-dev-shm-usage',
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
-            '--no-zygote',
-            '--single-process',
             '--disable-gpu'
         ]
     }
