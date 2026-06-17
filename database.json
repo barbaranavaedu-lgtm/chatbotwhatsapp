@@ -1,0 +1,31 @@
+{
+  "settings": {
+    "autoResponseDelay": 3,
+    "bulkDelay": 2,
+    "defaultCountryCode": ""
+  },
+  "rules": [
+    {
+      "id": "rule_1",
+      "triggers": [
+        "hola",
+        "buenos dias",
+        "buenas tardes"
+      ],
+      "message": "¡Hola! Soy un bot automatizado. ¿En qué puedo ayudarte hoy?\nEscribe *precio* o *catalogo* para ver ejemplos.",
+      "media": null,
+      "captionMode": true
+    },
+    {
+      "id": "rule_2",
+      "triggers": [
+        "precio",
+        "costos",
+        "planes"
+      ],
+      "message": "Nuestros servicios premium tienen los siguientes costos:\n- Plan Básico: $29 USD/mes\n- Plan Pro: $49 USD/mes\n- Plan Enterprise: Contactar a soporte.",
+      "media": null,
+      "captionMode": true
+    }
+  ]
+}

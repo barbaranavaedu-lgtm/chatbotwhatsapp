@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const qrcode = require('qrcode');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const db = require('./db');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,8 +22,8 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
-// Configuration in memory
-let autoResponseDelay = 3; // in seconds
+// Load config from Database
+let config = db.getSettings();
 let isConnected = false;
 let qrCodeString = null;
 let qrCodeUrl = null;
@@ -30,9 +31,29 @@ let qrCodeUrl = null;
 // Helpers
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-// Mini mock files (base64)
-const MOCK_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-const MOCK_PDF = 'JVBERi0xLjEKMSAwIG9iagogIDw8IC9UeXBlIC9DYXRhbG9nCiAgICAgL1BhZ2VzIDIgMCBSCiAgPj4KZW5kb2JqCjIgMCBvYmoKICA8PCAvVHlwZSAvUGFnZXMKICAgICAvS2lkcyBbIDMgMCBSIF0KICAgICAvQ291bnQgMQogID4+CmVuZG9iagozIDAgb2JqCiAgPDwgL1R5cGUgL1BhZ2UKICAgICAvUGFyZW50IDIgMCBSCiAgICAgL1Jlc291cmNlcyA8PCA+PgogICAgIC9NZWRpYUJveCBbIDAgMCA1OTUgODQyIF0KICA+PgplbmRvYmoKeHJlZgowIDQKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNjIgMDAwMDAgbiAKMDAwMDAwMDEyNSAwMDAwMCBuIAp0cmFpbGVyCiAgPDwgL1NpemUgNAogICAgIC9Sb290IDEgMCBSCiAgPj4Kc3RhcnR4cmVmCjIwMwolJUVPRgo=';
+// Format phone numbers
+function formatPhoneNumber(number, defaultPrefix = '') {
+    let clean = number.replace(/[^\d]/g, '');
+    if (!clean) return null;
+    
+    // If a default prefix is set and the number is short (doesn't start with prefix or is local length), prepend it
+    if (defaultPrefix && !clean.startsWith(defaultPrefix) && clean.length <= 10) {
+        clean = defaultPrefix + clean;
+    }
+    
+    return `${clean}@c.us`;
+}
+
+// Parse templates
+function parseTemplate(text, variables = {}) {
+    if (!text) return '';
+    let parsed = text;
+    Object.entries(variables).forEach(([key, val]) => {
+        const placeholder = new RegExp(`{{\\s*${key}\\s*}}`, 'gi');
+        parsed = parsed.replace(placeholder, val || '');
+    });
+    return parsed;
+}
 
 // Initialize WhatsApp Web Client
 const client = new Client({
@@ -89,109 +110,156 @@ client.on('disconnected', (reason) => {
     client.initialize().catch(err => console.error("Re-initialization failed:", err));
 });
 
-// Auto-responses
+// Auto-responses matching rules from database
 client.on('message', async (msg) => {
     const text = msg.body.toLowerCase().trim();
     const chat = await msg.getChat();
+    const rules = db.getRules();
 
-    // Check keywords
-    const keywords = ['hola', 'precio', 'contacto', 'pdf', 'imagen'];
-    const matchedKeyword = keywords.find(keyword => text.includes(keyword));
+    // Find first matching rule
+    const matchedRule = rules.find(rule => {
+        return rule.triggers.some(trigger => text.includes(trigger.toLowerCase().trim()));
+    });
 
-    if (matchedKeyword) {
-        console.log(`Matched keyword "${matchedKeyword}" from ${msg.from}`);
+    if (matchedRule) {
+        console.log(`Matched rule triggers [${matchedRule.triggers.join(', ')}] from ${msg.from}`);
         
         // Simulating human writing
         await chat.sendStateTyping();
-        await delay(autoResponseDelay * 1000);
+        await delay(config.autoResponseDelay * 1000);
 
         try {
-            if (matchedKeyword === 'hola') {
-                await msg.reply('¡Hola! Soy un bot automatizado. ¿En qué puedo ayudarte hoy?\nEscribe *precio*, *contacto*, *pdf* o *imagen* para ver ejemplos.');
-            } else if (matchedKeyword === 'precio') {
-                await msg.reply('Nuestros servicios premium tienen los siguientes costos:\n- Plan Básico: $29 USD/mes\n- Plan Pro: $49 USD/mes\n- Plan Enterprise: Contactar a soporte.');
-            } else if (matchedKeyword === 'contacto') {
-                await msg.reply('Puedes contactar con soporte técnico al correo: soporte@ejemplo.com o llamando al +1-800-555-0199.');
-            } else if (matchedKeyword === 'pdf') {
-                // PDF Demo - Demonstration of Caption (N/A for PDF usually, but sent as Caption)
-                const mediaPdf = new MessageMedia('application/pdf', MOCK_PDF, 'Catalogo.pdf');
-                await client.sendMessage(msg.from, mediaPdf, { caption: 'Aquí tienes nuestro catálogo en formato PDF (Caption Mode).' });
-            } else if (matchedKeyword === 'imagen') {
-                // Image Demo - Demonstration of Independent Mode (Separate message)
-                const mediaPng = new MessageMedia('image/png', MOCK_PNG, 'Demo.png');
-                // Send media first
-                await client.sendMessage(msg.from, mediaPng);
-                // Then send text immediately after
-                await client.sendMessage(msg.from, 'Esta es la descripción de la imagen enviada de forma independiente.');
+            if (matchedRule.media && matchedRule.media.data) {
+                const messageMedia = new MessageMedia(
+                    matchedRule.media.mimetype, 
+                    matchedRule.media.data, 
+                    matchedRule.media.filename
+                );
+                if (matchedRule.captionMode) {
+                    await client.sendMessage(msg.from, messageMedia, { caption: matchedRule.message });
+                } else {
+                    await client.sendMessage(msg.from, messageMedia);
+                    if (matchedRule.message && matchedRule.message.trim()) {
+                        await client.sendMessage(msg.from, matchedRule.message);
+                    }
+                }
+            } else {
+                // Text only
+                if (matchedRule.message && matchedRule.message.trim()) {
+                    await msg.reply(matchedRule.message);
+                }
             }
         } catch (error) {
-            console.error('Error handling auto-response:', error);
+            console.error('Error handling auto-response rule:', error);
         }
     }
 });
 
-// Endpoints
+// API Endpoints
+
+// Status
 app.get('/api/status', (req, res) => {
     res.json({ isConnected, qrCodeUrl, qrCode: qrCodeString });
 });
 
-app.post('/api/config', (req, res) => {
-    const { delayValue } = req.body;
-    if (typeof delayValue === 'number' && delayValue >= 0) {
-        autoResponseDelay = delayValue;
-        console.log(`autoResponseDelay updated to: ${autoResponseDelay} seconds`);
-        return res.json({ success: true, autoResponseDelay });
-    }
-    return res.status(400).json({ error: 'Invalid delay value' });
+// Config Settings
+app.get('/api/config', (req, res) => {
+    res.json(db.getSettings());
 });
 
-app.post('/api/send', async (req, res) => {
-    const { numbers, message, media, bulkDelay, captionMode } = req.body;
-    // captionMode is boolean. true = Caption, false = Independent (Separate)
+app.post('/api/config', (req, res) => {
+    const { autoResponseDelay, bulkDelay, defaultCountryCode } = req.body;
+    const current = db.getSettings();
+    
+    const updated = db.saveSettings({
+        autoResponseDelay: typeof autoResponseDelay === 'number' ? autoResponseDelay : current.autoResponseDelay,
+        bulkDelay: typeof bulkDelay === 'number' ? bulkDelay : current.bulkDelay,
+        defaultCountryCode: typeof defaultCountryCode === 'string' ? defaultCountryCode : current.defaultCountryCode
+    });
+    
+    config = updated;
+    console.log('Settings updated in DB:', updated);
+    res.json({ success: true, settings: updated });
+});
 
-    if (!Array.isArray(numbers) || numbers.length === 0) {
-        return res.status(400).json({ error: 'Numbers list must be a non-empty array' });
+// Rules CRUD
+app.get('/api/rules', (req, res) => {
+    res.json(db.getRules());
+});
+
+app.post('/api/rules', (req, res) => {
+    const { id, triggers, message, media, captionMode } = req.body;
+    if (!Array.isArray(triggers) || triggers.length === 0) {
+        return res.status(400).json({ error: 'Triggers must be a non-empty array' });
+    }
+    const saved = db.saveRule({
+        id,
+        triggers,
+        message: message || '',
+        media: media || null,
+        captionMode: typeof captionMode === 'boolean' ? captionMode : true
+    });
+    res.json({ success: true, rule: saved });
+});
+
+app.delete('/api/rules/:id', (req, res) => {
+    const success = db.deleteRule(req.params.id);
+    if (success) {
+        return res.json({ success: true });
+    }
+    return res.status(404).json({ error: 'Rule not found' });
+});
+
+// Bulk Campaign Sender
+app.post('/api/send', async (req, res) => {
+    const { recipients, message, media, bulkDelay, captionMode } = req.body;
+    // recipients: Array of { number: '...', variables: { nombre: '...', correo: '...' } }
+
+    if (!Array.isArray(recipients) || recipients.length === 0) {
+        return res.status(400).json({ error: 'Recipients list must be a non-empty array' });
     }
 
-    const delayMs = (typeof bulkDelay === 'number' ? bulkDelay : 2) * 1000;
-    console.log(`Starting bulk send for ${numbers.length} numbers with delay ${delayMs}ms`);
+    const currentSettings = db.getSettings();
+    const delayMs = (typeof bulkDelay === 'number' ? bulkDelay : currentSettings.bulkDelay) * 1000;
+    const prefix = currentSettings.defaultCountryCode || '';
 
-    // Run in background and respond immediately to avoid API timeout
-    res.json({ success: true, message: 'Bulk sending job started.' });
+    console.log(`Starting bulk campaign for ${recipients.length} recipients with delay ${delayMs}ms`);
 
-    for (let i = 0; i < numbers.length; i++) {
-        let number = numbers[i].replace(/[^\d]/g, '');
-        if (!number) continue;
+    // Run in background
+    res.json({ success: true, message: 'Campaign started in background.' });
 
-        // format to whatsapp JID
-        const formattedNumber = `${number}@c.us`;
+    for (let i = 0; i < recipients.length; i++) {
+        const item = recipients[i];
+        if (!item || !item.number) continue;
+
+        const formattedNumber = formatPhoneNumber(item.number, prefix);
+        if (!formattedNumber) continue;
+
+        // Parse custom variables
+        const personalMessage = parseTemplate(message, item.variables || {});
 
         try {
             if (media && media.data) {
                 const messageMedia = new MessageMedia(media.mimetype, media.data, media.filename);
                 if (captionMode) {
-                    // Caption Mode: Combined message
-                    await client.sendMessage(formattedNumber, messageMedia, { caption: message });
+                    await client.sendMessage(formattedNumber, messageMedia, { caption: personalMessage });
                 } else {
-                    // Independent Mode: Send media first, then message
                     await client.sendMessage(formattedNumber, messageMedia);
-                    if (message && message.trim()) {
-                        await client.sendMessage(formattedNumber, message);
+                    if (personalMessage && personalMessage.trim()) {
+                        await client.sendMessage(formattedNumber, personalMessage);
                     }
                 }
             } else {
-                // Text only
-                if (message && message.trim()) {
-                    await client.sendMessage(formattedNumber, message);
+                if (personalMessage && personalMessage.trim()) {
+                    await client.sendMessage(formattedNumber, personalMessage);
                 }
             }
-            console.log(`Successfully sent to ${formattedNumber}`);
+            console.log(`Successfully sent campaign message to ${formattedNumber}`);
         } catch (err) {
-            console.error(`Failed to send to ${formattedNumber}:`, err);
+            console.error(`Failed to send campaign message to ${formattedNumber}:`, err);
         }
 
-        // Apply delay between numbers (but not after the last one)
-        if (i < numbers.length - 1) {
+        if (i < recipients.length - 1) {
             await delay(delayMs);
         }
     }
